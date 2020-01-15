@@ -1,0 +1,25 @@
+{
+  "name": "filebase",
+  "version": "1.0.0",
+  "description": "File-based databases in Node.js",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Panteum/filebase.git"
+  },
+  "keywords": [
+    "file",
+    "filebase",
+    "database",
+    "node"
+  ],
+  "author": "vocafeuvre",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Panteum/filebase/issues"
+  },
+  "homepage": "https://github.com/Panteum/filebase#readme"
+}
