@@ -207,42 +207,48 @@ class Heapbase extends EventEmitter {
             throw new Error(`Cannot load the Heapbase without a heapindex list if persistence file has contents.`)
         }
 
-        // sort heapindex list first, so that we have the first positions first
-        // NOTE: do a quicksort here if we have time
-        const sortedOccupiedSegments = occupiedSegments.sort((a, b) => a.pos - b.pos)
+        // only load occupied segments if the file has contents
+        if (stats.size !== 0) {
+            // sort heapindex list first, so that we have the first positions first
+            // NOTE: do a quicksort here if we have time
+            const sortedOccupiedSegments = occupiedSegments.sort((a, b) => a.pos - b.pos)
 
-        // evaluate heapindex list        
-        var loadPos = 0
-        for (let x = 0; x < sortedOccupiedSegments.length; x++) {
-            const heapindex = sortedOccupiedSegments[x]
-            
-            // if heapindex size is not less than file size, the file is corrupted
-            if (stats.size < (heapindex.pos + heapindex.size)) {
-                this.errorStatus = FILEBASE_ERRS.CORRUPTION
-                throw new Error(`Heapbase '${this.filepath}' is corrupted. Heapindex list did not match the file size.`)
+            // evaluate heapindex list        
+            var loadPos = 0
+            for (let x = 0; x < sortedOccupiedSegments.length; x++) {
+                const heapindex = sortedOccupiedSegments[x]
+                
+                // if heapindex size is not less than file size, the file is corrupted
+                if (stats.size < (heapindex.pos + heapindex.size)) {
+                    this.errorStatus = FILEBASE_ERRS.CORRUPTION
+                    throw new Error(`Heapbase '${this.filepath}' is corrupted. Heapindex list did not match the file size.`)
+                }
+
+                // if current heapindex pos is not the current load position
+                // we have found a free segment, save it
+                if (heapindex.pos !== loadPos) {
+                    const freeSegmentIndex = {
+                        pos: loadPos,
+                        size: heapindex.pos - loadPos
+                    }
+                    this.trackFreeSegment(freeSegmentIndex)
+                }
+
+                // update load position
+                loadPos = heapindex.pos + heapindex.size
             }
 
-            // if current heapindex pos is not the current load position
-            // we have found a free segment, save it
-            if (heapindex.pos !== loadPos) {
+            // check if we have empty segment after, save if there is
+            if (loadPos < stats.size) {
                 const freeSegmentIndex = {
                     pos: loadPos,
-                    size: heapindex.pos - loadPos
+                    size: stats.size - loadPos
                 }
                 this.trackFreeSegment(freeSegmentIndex)
             }
 
-            // update load position
-            loadPos = heapindex.pos + heapindex.size
-        }
-
-        // check if we have empty segment after, save if there is
-        if (loadPos < stats.size) {
-            const freeSegmentIndex = {
-                pos: loadPos,
-                size: stats.size - loadPos
-            }
-            this.trackFreeSegment(freeSegmentIndex)
+            // save to occupiedSegments
+            this.occupiedSegments = sortedOccupiedSegments
         }
 
         // save heap size
