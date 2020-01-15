@@ -1021,8 +1021,12 @@ class HeapbaseManager extends EventEmitter {
             await this.heapbase.load(Array.from(idExchange.values()))
         }
 
-        // save id exchange
-        this.idExchange = idExchange
+        // save id exchange only if heapbase has contents
+        // even if we load the id exchange to heapbase,
+        // it will get ignored if the persistence file's size is 0
+        if (this.heapbase.occupiedSegments.size !== 0) {
+            this.idExchange = idExchange
+        }
 
         // validate schema
         // set hollow functions for serialize and deserialize
