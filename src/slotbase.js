@@ -700,7 +700,7 @@ const SLOT_SEGMENT_TYPES = {
 /**
  * Record that is convertible to a slot.
  * 
- * @typedef {Map<string, *>} SlotRecord
+ * @typedef {Object.<string, *>} SlotRecord
  */
 
 /**
@@ -964,29 +964,23 @@ class SlotbaseManager extends EventEmitter {
     serializeRecord(record) {
         const slotdata = Buffer.alloc(this.slotbase.slotSize)
 
-        // iterate record fields, to write to slotdata
-        const recordIterator = record.keys()
+        // iterate record schema, to write to slotdata
+        const schemaIterator = this.segmentSchemas.values()
         while (true) {
-            const { done, value } = recordIterator.next()
+            const { done, value } = schemaIterator.next()
 
             if (done) {
                 break
             }
 
-            // get the schema for this field
-            const schema = this.segmentSchemas.get(value)
-            if (schema === undefined) {
-                return
-            }
-
             // get the data from the record
-            const field = record.get(value)
+            const field = record[value.name]
 
             // serialize the data according to schema
-            const segment = schema.serialize(field)
+            const segment = value.serialize(field)
 
             // write to buffer
-            slotdata.set(segment, schema.pos)
+            slotdata.set(segment, value.pos)
         }
 
         return slotdata
@@ -1017,7 +1011,7 @@ class SlotbaseManager extends EventEmitter {
             // deserialize the segment
             const field = value.deserialize(segment)
 
-            record.set(value.name, field)
+            record[value.name] = field
         }
 
         return record
@@ -1110,7 +1104,7 @@ class SlotbaseManager extends EventEmitter {
      */
     add(record) {
         // get the id first and verify if existing
-        const id = record.get(this.idSchema.name)
+        const id = record[this.idSchema.name]
         if (this.idExchange.has(id)) {
             throw new Error(`Record of id ${id} is already found in the Slotbase.`)
         }
@@ -1190,11 +1184,11 @@ class SlotbaseManager extends EventEmitter {
             const schema = this.segmentSchemas.get(fieldToUpdate)
 
             if (schema !== undefined) {
-                const fieldData = record.get(fieldToUpdate)
+                const fieldData = record[fieldToUpdate]
 
                 // update cache first
                 if (cacheRecord !== undefined) {
-                    cacheRecord.set(fieldToUpdate, fieldData)
+                    cacheRecord[fieldToUpdate] = fieldData
                 }
 
                 // make the segment
