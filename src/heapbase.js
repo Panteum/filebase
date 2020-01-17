@@ -290,7 +290,7 @@ class Heapbase extends EventEmitter {
         var bufferedSize = 0
         var nextWritePos = 0
 
-        const handle = await fsprom.open(this.filepath, "a+")
+        const handle = await fsprom.open(this.filepath, "r+")
 
         // try not to load all buffers into memory as this will take a toll on the computer
         const occupiedSegmentIterator = this.occupiedSegments.values()
@@ -385,7 +385,7 @@ class Heapbase extends EventEmitter {
         var returnHandle = true
         if (!handle) {
             try {
-                handle = await fsprom.open(this.filepath, "a+")
+                handle = await fsprom.open(this.filepath, "r+")
             } catch (e) {
                 if (inTimeout) {
                     this.emit(ERROR_EVENT, { err: e })
@@ -871,7 +871,7 @@ class Heapbase extends EventEmitter {
         const buffer = Buffer.alloc(heapindex.size)
 
         // open the handle first
-        var handle = await fsprom.open(this.filepath, "a+")
+        var handle = await fsprom.open(this.filepath, "r+")
 
         // perform all pending operations first
         handle = await this.flushOpQueue(handle)
@@ -902,7 +902,7 @@ class Heapbase extends EventEmitter {
         const buffer = Buffer.alloc(heapindex.size)
 
         // get the heapdata
-        const handle = await fsprom.open(this.filepath, "a+")
+        const handle = await fsprom.open(this.filepath, "r")
         const data = await handle.read(buffer, 0, heapindex.size, heapindex.pos)
         await handle.close()
 

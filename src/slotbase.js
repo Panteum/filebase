@@ -205,7 +205,7 @@ class Slotbase extends EventEmitter {
             return
         }
         
-        const handle = await fsprom.open(this.filepath, "a+")
+        const handle = await fsprom.open(this.filepath, "r+")
 
         /** 
          * Map of previous slotindex to new slotindex 
@@ -287,7 +287,7 @@ class Slotbase extends EventEmitter {
         var returnHandle = true
         if (!handle) {
             try {
-                handle = await fsprom.open(this.filepath, "a+")
+                handle = await fsprom.open(this.filepath, "r+")
             } catch (e) {
                 if (inTimeout) {
                     this.emit(ERROR_EVENT, { err: e })
@@ -592,7 +592,7 @@ class Slotbase extends EventEmitter {
         const slotpos = slotindex * this.slotSize
 
         // open the handle first
-        var handle = await fsprom.open(this.filepath, "a+")
+        var handle = await fsprom.open(this.filepath, "r+")
 
         // perform all pending operations first
         handle = await this.flushOpQueue(handle)
@@ -625,7 +625,7 @@ class Slotbase extends EventEmitter {
         const slotpos = slotindex * this.slotSize
 
         // get the slotdata
-        const handle = await fsprom.open(this.filepath, "a+")
+        const handle = await fsprom.open(this.filepath, "r")
         const data = await handle.read(buffer, 0, this.slotSize, slotpos)
         await handle.close()
 
@@ -639,7 +639,7 @@ class Slotbase extends EventEmitter {
      * @param {number[]} [slotindexes] - Indexes to fetch. If not set, the iterator fetches all.
      */
     async iterate(slotindexes) {
-        var handle = await fsprom.open(this.filepath, "a+")
+        var handle = await fsprom.open(this.filepath, "r+")
 
         // perform all pending operations first
         handle = await this.flushOpQueue(handle)
