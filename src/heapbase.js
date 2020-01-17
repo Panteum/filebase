@@ -158,7 +158,7 @@ class Heapbase extends EventEmitter {
      * @param {string} filepath - Path to the persistence file for the Heapbase.
      * @param {HeapbaseOptions} [options={}] - Options to customize the operations of the Heapbase.
      */
-    constructor (filepath, options) {
+    constructor (filepath, options = {}) {
         if (!path.isAbsolute(filepath)) {
             throw new Error("Cannot accept a relative filepath.")
         }
