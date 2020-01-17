@@ -721,18 +721,19 @@ const SLOT_SEGMENT_TYPES = {
  */
 
 /**
- * Function that serializes a record field into a slot segment of type Buffer.
+ * Function that encodes a record field's data into a slot segment of the record buffer.
  * 
- * @callback SegmentSerializer
- * @param {*} field - Field data to serialize.
+ * @callback SegmentEncoder
+ * @param {Buffer} buffer - Buffer used to encode the field data to.
+ * @param {*} field - Field data to encode.
  * @returns {Buffer}
  */
 
 /**
- * Function that deserializes a segment buffer into a record field.
+ * Function that decodes a record field's data from a record buffer.
  * 
- * @callback SegmentDeserializer
- * @param {Buffer} segment - Segment to deserialize.
+ * @callback SegmentDecoder
+ * @param {Buffer} buffer - Buffer containing the segment to decode.
  */
 
 /**
@@ -743,8 +744,8 @@ const SLOT_SEGMENT_TYPES = {
  * @property {number} pos - Position of the segment in the slot.
  * @property {number} size - Size of the segment.
  * @property {boolean} isId - Flag signifying that the segment of the schema is treated as the id of the record.
- * @property {SegmentSerializer} serialize - Serializes a field into a segment buffer.
- * @property {SegmentDeserializer} deserialize - Deserializes a segment buffer into a field.
+ * @property {SegmentEncoder} encode - Encodes a field's data into a record buffer.
+ * @property {SegmentDecoder} decode - Decodes a field's data from a record buffer.
  */
 
 /**
@@ -881,13 +882,9 @@ class SlotbaseManager extends EventEmitter {
                 throw new Error(`Segment schemas must have their poses within the Slotbase's slot size: ${value.name}`)
             }
 
-            // set hollow functions for serialize and deserialize
-            if (value.deserialize === undefined) {
-                value.deserialize = HOLLOW_FUNC
-            }
-
-            if (value.serialize === undefined) {
-                value.serialize = HOLLOW_FUNC
+            // we need encode and decode in the schema for record de/serialization
+            if (value.encode === undefined || value.decode === undefined) {
+                throw new Error(`Segment schemas must have a SegmentEncoder and a SegmentDecoder.`)
             }
 
             // compute total schema size
@@ -922,8 +919,7 @@ class SlotbaseManager extends EventEmitter {
             }
 
             // populate the id exchange
-            const idSegment = value.slice(this.idSchema.pos, this.idSchema.size)
-            const id = this.idSchema.deserialize(idSegment)
+            const id = this.idSchema.decode(value)
             this.idExchange.set(id, index)
         }
         
@@ -1091,7 +1087,7 @@ class SlotbaseManager extends EventEmitter {
     }
 
     /**
-     * Serializes a slot record. Returns the slot buffer if successfully built;
+     * Serializes a slot record. Returns the record buffer if successfully built;
      * otherwise, returns undefined.
      * 
      * @param {SlotRecord} record - Record to serialize.
@@ -1112,10 +1108,7 @@ class SlotbaseManager extends EventEmitter {
             const field = record[value.name]
 
             // serialize the data according to schema
-            const segment = value.serialize(field)
-
-            // write to buffer
-            slotdata.set(segment, value.pos)
+            slotdata = value.encode(slotdata, field)
         }
 
         return slotdata
@@ -1129,7 +1122,7 @@ class SlotbaseManager extends EventEmitter {
      * 
      * @returns {SlotRecord}
      */
-    deserializeSlot(slot) {
+    deserializeSlot(slotdata) {
         const record = new Map()
 
         const schemaIterator = this.segmentSchemas.values()
@@ -1140,11 +1133,8 @@ class SlotbaseManager extends EventEmitter {
                 break
             }
 
-            // slice the segment buffer off the slot
-            const segment = slot.slice(value.pos, value.size)
-
-            // deserialize the segment
-            const field = value.deserialize(segment)
+            // decode the field
+            const field = value.decode(slotdata)
 
             record[value.name] = field
         }
