@@ -304,16 +304,19 @@ class Slotbase extends EventEmitter {
             // always do FIFO
             const dataOp = this.opQueue.shift()
 
-            let err, eventName, eventObj
+            let err, eventName, eventObj, opId
             try {
                 // perform the data operation
                 if (dataOp.type === DATA_OPS.INSERT) {
+                    opId = dataOp.id
                     eventName = dataOp.type
                     eventObj = await this._insert(handle, dataOp)
                 } else if (dataOp.type === DATA_OPS.DELETE) {
+                    opId = dataOp.id
                     eventName = dataOp.type
                     eventObj = await this._delete(handle, dataOp)
                 } else if (dataOp.type === DATA_OPS.UPDATE) {
+                    opId = dataOp.id
                     eventName = dataOp.type
                     eventObj = await this._update(handle, dataOp)
                 }
@@ -327,6 +330,7 @@ class Slotbase extends EventEmitter {
                 if (eventName) {
                     // emit the event
                     eventObj = eventObj || {}
+                    eventObj.id = opId
                     eventObj.err = err
                     this.emit(eventName, eventObj)
                 }
@@ -372,8 +376,9 @@ class Slotbase extends EventEmitter {
 
         // create the operation entry
         const dataOp = {
+            id,
             type: DATA_OPS.INSERT,
-            args: [slotdata, id]
+            args: [slotdata]
         }
 
         // add to the queue
@@ -422,7 +427,7 @@ class Slotbase extends EventEmitter {
         }
 
         // return the event
-        return { slotindex, id: op.args[1] }
+        return { slotindex }
     }
 
     /**
@@ -443,8 +448,9 @@ class Slotbase extends EventEmitter {
 
         // create the operation entry
         const dataOp = {
+            id,
             type: DATA_OPS.DELETE,
-            args: [slotindex, id]
+            args: [slotindex]
         }
 
         // add to the queue
@@ -485,7 +491,7 @@ class Slotbase extends EventEmitter {
         this.freeSlots.push(slotindex)
 
         // return the event
-        return { slotindex, id: op.args[1] }
+        return { slotindex }
     }
 
     /**
@@ -518,8 +524,9 @@ class Slotbase extends EventEmitter {
 
         // create the operation entry
         const dataOp = {
+            id,
             type: DATA_OPS.UPDATE,
-            args: [slotindex, slotdata, offset, length, id]
+            args: [slotindex, slotdata, offset, length]
         }
 
         // add to the queue
@@ -564,7 +571,7 @@ class Slotbase extends EventEmitter {
         await handle.write(slotdata, 0, writelength, writepos)
 
         // return the event
-        return { slotindex, id: op.args[4] }
+        return { slotindex }
     }
 
     /**
