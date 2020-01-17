@@ -55,6 +55,7 @@ const HOLLOW_FUNC = function (value) {
  * 
  * @typedef DataOp
  * @property {string} type - Type of the operation to be performed.
+ * @property {any} id - Value used to identify the operation.
  * @property {any[]} args - Arguments to the operation.
  */
 

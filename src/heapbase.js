@@ -389,6 +389,7 @@ class Heapbase extends EventEmitter {
             } catch (e) {
                 if (inTimeout) {
                     this.emit(ERROR_EVENT, { err: e })
+                    return
                 } else {
                     throw e
                 }
@@ -401,16 +402,19 @@ class Heapbase extends EventEmitter {
             // always do FIFO
             const dataOp = this.opQueue.shift()
 
-            let err, eventName, eventObj
+            let err, eventName, eventObj, opId
             try {
                 // perform the data operation
                 if (dataOp.type === DATA_OPS.INSERT) {
+                    opId = dataOp.id
                     eventName = dataOp.type
                     eventObj = await this._insert(handle, dataOp)
                 } else if (dataOp.type === DATA_OPS.DELETE) {
+                    opId = dataOp.id
                     eventName = dataOp.type
                     eventObj = await this._delete(handle, dataOp)
                 } else if (dataOp.type === DATA_OPS.UPDATE) {
+                    opId = dataOp.id
                     eventName = dataOp.type
                     eventObj = await this._update(handle, dataOp)
                 }
@@ -424,6 +428,7 @@ class Heapbase extends EventEmitter {
                 if (eventName) {
                     // emit the event
                     eventObj = eventObj || {}
+                    eventObj.id == opId
                     eventObj.err = err
                     this.emit(eventName, eventObj)
                 }
@@ -547,8 +552,9 @@ class Heapbase extends EventEmitter {
 
         // create the operation entry
         const dataOp = {
+            id,
             type: DATA_OPS.INSERT,
-            args: [heapdata, id]
+            args: [heapdata]
         }
 
         // add to the queue
@@ -631,7 +637,7 @@ class Heapbase extends EventEmitter {
         this.occupiedSegments.set(returnHeapindex.pos, returnHeapindex)
 
         // return the event
-        return { heapindex: returnHeapindex, id: op.args[1] }
+        return { heapindex: returnHeapindex }
     }
 
     /**
@@ -660,8 +666,9 @@ class Heapbase extends EventEmitter {
 
         // create the operation entry
         const dataOp = {
+            id,
             type: DATA_OPS.DELETE,
-            args: [heapindex, id]
+            args: [heapindex]
         }
 
         // add to the queue
@@ -705,8 +712,8 @@ class Heapbase extends EventEmitter {
         // add to free segment list
         this.trackFreeSegment(heapindex)
 
-        // emit the delete event
-        this.emit("delete", { heapindex, id: op.args[1] })
+        // return the delete event
+        return { heapindex }
     }
 
     /**
@@ -741,8 +748,9 @@ class Heapbase extends EventEmitter {
 
         // create the operation entry
         const dataOp = {
+            id,
             type: DATA_OPS.UPDATE,
-            args: [heapindex, heapdata, id]
+            args: [heapindex, heapdata]
         }
 
         // add to the queue
@@ -774,10 +782,17 @@ class Heapbase extends EventEmitter {
         }
 
         // get the heapindex from occupiedSpaces, to make sure it is valid
+        // also so that we can manipulate the entry in the occupiedSegments map mutably
         const heapindex = this.occupiedSegments.get(op.args[0].pos)
 
         // get the heapdata
         const heapdata = op.args[1]
+
+        // heapindex of the adjacent segment
+        var adjacentSegmentIndex
+
+        // signifies if we can use the adjacent segment for writing
+        var canUseAdjacentSegment = false
 
         // check if data size for updating is bigger than current segment space
         // we need to increase if there is a free adjacent space, or find a bigger space altogether
@@ -785,21 +800,12 @@ class Heapbase extends EventEmitter {
             const adjacentPos = heapindex.size + heapindex.pos
 
             // check if we can use adjacent segment
-            let canUseAdjacentSegment = this.freeSegments.has(adjacentPos)
+            canUseAdjacentSegment = this.freeSegments.has(adjacentPos)
             if (canUseAdjacentSegment) {
-                const adjacentSegmentIndex = this.freeSegments.get(adjacentPos)
+                adjacentSegmentIndex = this.freeSegments.get(adjacentPos)
 
                 // overwrite this flag, no problem, we're just cascading if's
                 canUseAdjacentSegment = heapdata.length <= (adjacentSegmentIndex.size + heapindex.size)
-                if (canUseAdjacentSegment) {
-                    // manipulate freeSegmentsQueue and freeSegments to pop the adjacent segment
-                    this.freeSegmentQueues.get(adjacentSegmentIndex.size).delete(adjacentPos)
-                    this.freeSegments.delete(adjacentPos)
-
-                    // merge adjacent index to current index
-                    // using JS's awesome powers of mutability
-                    heapindex.size += adjacentSegmentIndex.size
-                }
             }
 
             // cannot use adjacent segment, seek out another free segment or add to last
@@ -812,14 +818,23 @@ class Heapbase extends EventEmitter {
                 this.occupiedSegments.delete(heapindex.pos)
                 this.trackFreeSegment(heapindex)
 
-                return { heapindex: output.heapindex, id: op.args[2] }
+                return { heapindex: output.heapindex }
             }
         }
 
         // perform the update
         await handle.write(heapdata, 0, heapdata.length, heapindex.pos)
 
-        // TODO: do rollback here for the adjacent segment if error is thrown
+        // apply the adjustment to the adjacent segment if we happen to use it
+        if (canUseAdjacentSegment && adjacentSegmentIndex !== undefined) {
+            // manipulate freeSegmentsQueue and freeSegments to pop the adjacent segment
+            this.freeSegmentQueues.get(adjacentSegmentIndex.size).delete(adjacentSegmentIndex.pos)
+            this.freeSegments.delete(adjacentSegmentIndex.pos)
+
+            // merge adjacent index to current index
+            // using JS's awesome powers of mutability
+            heapindex.size += adjacentSegmentIndex.size
+        }
 
         // if there is extra space after update, set it as a free segment
         if (heapdata.length < heapindex.size) {
@@ -837,7 +852,7 @@ class Heapbase extends EventEmitter {
         }
 
         // emit the event
-        return { heapindex, id: op.args[2] }
+        return { heapindex }
     }
 
     /**
@@ -914,6 +929,15 @@ class Heapbase extends EventEmitter {
 }
 
 /**
+ * Entry to the rollback map, contains pertinent info used for the rollback
+ * 
+ * @typedef RollbackEntry
+ * @property {*} id - Id of the data to rollback.
+ * @property {*} data - Data used for the rollback.
+ * @property {HeapIndex} index - Index used for the rollback.
+ */
+
+/**
  * Function that serializes a record field into a segment of type Buffer.
  * 
  * @callback SegmentSerializer
@@ -977,14 +1001,28 @@ class HeapbaseManager extends EventEmitter {
     cacheLimit
 
     /**
-     * Map of segment data to be rolled back in case of a write error.
+     * Map of segment data to be rolled back in case of a write error. Keyed by data id.
      * 
      * @todo Each rollback should be saved in a queue manner, if an operation is successful the
      * corresponding rollback is shifted out. When an error happens, we can be sure that the rollback
      * is then accurate.
-     * @type {Map<any, any[]>}
+     * @type {Map<any, RollbackEntry[]>}
      */
     rollbackMap
+
+    /**
+     * Map of resolve functions from data operation calls keyed by their corresponding data ids. Organized per data operation type.
+     * 
+     * @type {Map<string, Map<any, ((value:any) => void)[]>>}
+     */
+    resolveMap
+
+    /**
+     * Map of reject functions from data operation calls keyed by their corresponding data ids. Organized per data operation type.
+     * 
+     * @type {Map<string, Map<any, ((err: any) => void)[]>>}
+     */
+    rejectMap
 
     /**
      * Creates a HeapbaseManager.
@@ -1002,6 +1040,16 @@ class HeapbaseManager extends EventEmitter {
         this.rollbackMap = new Map()
         this.idExchange = new Map()
         this.cacheLimit = limit
+
+        this.resolveMap = new Map()
+        this.resolveMap.set(DATA_OPS.INSERT, new Map())
+        this.resolveMap.set(DATA_OPS.DELETE, new Map())
+        this.resolveMap.set(DATA_OPS.UPDATE, new Map())
+
+        this.rejectMap = new Map()
+        this.rejectMap.set(DATA_OPS.INSERT, new Map())
+        this.rejectMap.set(DATA_OPS.DELETE, new Map())
+        this.rejectMap.set(DATA_OPS.UPDATE, new Map())
     }
 
     /**
@@ -1049,9 +1097,8 @@ class HeapbaseManager extends EventEmitter {
                     self.dataCache.delete(event.id)
                 }
 
-                // let user know also
-                self.emit(DATA_OPS.INSERT, event)
-
+                // let user know also by calling the appropriate reject
+                self.rejectOp(event.id, DATA_OPS.INSERT, event.err)
                 return
             }
 
@@ -1059,49 +1106,73 @@ class HeapbaseManager extends EventEmitter {
             // also save the heapindex into the id exchange
             self.idExchange.set(event.id, event.heapindex)
             self.unguardCacheRecord(event.id)
-            self.emit(DATA_OPS.INSERT, event)
+            
+            // resolve the corresponding data operation
+            self.resolveOp(event.id, DATA_OPS.INSERT, event.heapindex)
         })
 
         this.heapbase.on(DATA_OPS.DELETE, function (event) {
             if (event.err) {
                 // rollback in case of an error, if there's anything to rollback
                 if (self.rollbackMap.has(event.id)) {
-                    const rollbackData = self.rollbackMap.get(event.id).shift()
-                    if (rollbackData !== undefined) {
+                    const rollbackEntry = self.rollbackMap.get(event.id).shift()
+
+                    if (rollbackEntry.data !== undefined) {
                         // push to cache instead, we already removed it from the cache
-                        self.pushToCache(event.id, rollbackData, false)
+                        self.pushToCache(event.id, rollbackEntry.data, false)
                     }
 
                     if (self.rollbackMap.get(event.id).length === 0) {
                         self.rollbackMap.delete(event.id)
                     }
-                }
 
-                // rollback in the id exchange
-                self.idExchange.set(event.id, event.heapindex)
+                    // rollback in the id exchange
+                    self.idExchange.set(event.id, rollbackEntry.index)
+
+                    // let the user know about the error
+                    self.rejectOp(event.id, DATA_OPS.DELETE, event.err)
+
+                    return
+                } else {
+                    throw new Error(`Did not rollback on error, DELETE data op, data id ${event.id}`)
+                }
             }
 
-            // let user know also
-            self.emit(DATA_OPS.DELETE, event)
+            // resolve the corresponding data operation
+            self.resolveOp(event.id, DATA_OPS.DELETE, event.heapindex)
         })
 
         this.heapbase.on(DATA_OPS.UPDATE, function (event) {
             if (event.err) {
                 // rollback in case of an error
                 if (self.rollbackMap.has(event.id)) {
-                    const rollbackData = self.rollbackMap.get(event.id).shift()
-                    if (rollbackData !== undefined) {
-                        self.dataCache.set(event.id, rollbackData)
+                    const rollbackEntry = self.rollbackMap.get(event.id).shift()
+
+                    if (rollbackEntry.data !== undefined) {
+                        self.dataCache.set(event.id, rollbackEntry.data)
                     }
 
                     if (self.rollbackMap.get(event.id).length === 0) {
                         self.rollbackMap.delete(event.id)
                     }
+
+                    // rollback in the id exchange
+                    self.idExchange.set(event.id, rollbackEntry.index)
+
+                    // let the user know about the error
+                    self.rejectOp(event.id, DATA_OPS.DELETE, event.err)
+
+                    return
+                } else {
+                    throw new Error(`Did not rollback on error, UPDATE data op, data id ${event.id}`)
                 }
             }
 
-            // let user know also
-            self.emit(DATA_OPS.UPDATE, event)
+            // save the heapindex, it maybe a new index
+            self.idExchange.set(event.id, event.heapindex)
+
+            // resolve the corresponding data operation
+            self.resolveOp(event.id, DATA_OPS.UPDATE, event.heapindex)
         })
 
         this.heapbase.on(ERROR_EVENT, function (event) {
@@ -1109,6 +1180,80 @@ class HeapbaseManager extends EventEmitter {
         })
     }
     
+    /**
+     * Prepare for the eventual resolution of a data operation by returning a promise and
+     * saving its resolve and reject functions for later when the operation has concluded.
+     * 
+     * @param {*} id - Id used to identify the data operation.
+     * @param {string} opType - Type of the data operation.
+     */
+    prepareOpResolution(id, opType) {
+        const self = this
+        return new Promise (function (resolve, reject) {
+            // save the resolve function
+            if (self.resolveMap.get(opType).has(id)) {
+                self.resolveMap.get(opType).get(id).push(resolve)
+            } else {
+                self.resolveMap.get(opType).set(id, [resolve])
+            }
+
+            // save the reject function
+            if (self.rejectMap.get(opType).has(id)) {
+                self.rejectMap.get(opType).get(id).push(reject)
+            } else {
+                self.rejectMap.get(opType).set(id, [reject])
+            }
+        })
+    }
+
+    /**
+     * Resolve a pending data operation call.
+     * 
+     * @param {*} id - Id used to identify the data operation.
+     * @param {string} opType - Type of the data operation.
+     * @param  {...any} args - Additional arguments to pass to the resolve function.
+     */
+    resolveOp(id, opType, ...args) {
+        // remove the counterpart reject function first
+        const rejectQueue = this.rejectMap.get(opType).get(id)
+        rejectQueue.shift()
+        if (rejectQueue.length === 0) {
+            this.rejectMap.get(opType).delete(id)
+        }
+
+        const resolveQueue = this.resolveMap.get(opType).get(id)
+        const resolve = resolveQueue.shift()
+        if (resolveQueue.length === 0) {
+            this.resolveMap.get(opType).delete(id)
+        }
+
+        resolve(args)
+    }
+
+    /**
+     * Reject a pending data operation call.
+     * 
+     * @param {*} id - Id used to identify the data operation.
+     * @param {string} opType - Type of the data operation.
+     * @param {*} err - Error argument to pass to the reject function.
+     */
+    rejectOp(id, opType, err) {
+        // remove the counterpart resolve function first
+        const resolveQueue = this.resolveMap.get(opType).get(id)
+        resolveQueue.shift()
+        if (resolveQueue.length === 0) {
+            this.resolveMap.get(opType).delete(id)
+        }
+
+        const rejectQueue = this.rejectMap.get(opType).get(id)
+        const reject = rejectQueue.shift()
+        if (rejectQueue.length === 0) {
+            this.rejectMap.get(opType).delete(id)
+        }
+
+        reject(err)
+    }
+
     /**
      * Shifts the record cache to make space. Returns true if was able to shift.
      * 
@@ -1192,10 +1337,10 @@ class HeapbaseManager extends EventEmitter {
     /**
      * Adds a segment data to the Heapbase.
      * 
-     * @param {*} data - Data to be added.
      * @param {*} id - Id of the data, for tracking.
+     * @param {*} data - Data to be added.
      */
-    add(data, id) {
+    add(id, data) {
         // get the id first and verify if existing
         if (this.idExchange.has(id)) {
             throw new Error(`Data of id ${id} is already found in the Heapbase.`)
@@ -1209,6 +1354,8 @@ class HeapbaseManager extends EventEmitter {
 
         // save to cache while insert is ongoing
         this.pushToCache(id, data)
+
+        return this.prepareOpResolution(id, DATA_OPS.INSERT)
     }
 
     /**
@@ -1222,24 +1369,35 @@ class HeapbaseManager extends EventEmitter {
             throw new Error(`Data of id ${id} cannot be found in the Heapbase.`)
         }
 
+        // prepare the rollback entry
+        const rollbackEntry = {
+            data: undefined, 
+            id, 
+            index: heapindex
+        }
+
         // delete in the cache, if there is
         if (this.dataCache.has(id)) {
             // make sure to prepare for rollback
             const cacheData = this.dataCache.get(id).data
-
-            if (this.rollbackMap.has(id)) {
-                this.rollbackMap.get(id).push(cacheData)
-            } else {
-                this.rollbackMap.set(id, [cacheData])
-            }
+            rollbackEntry.data = cacheData
 
             this.dataCache.delete(id)
+        }
+
+        // save rollback entry
+        if (this.rollbackMap.has(id)) {
+            this.rollbackMap.get(id).push(rollbackEntry)
+        } else {
+            this.rollbackMap.set(id, [rollbackEntry])
         }
 
         // remove now from the heapbase
         this.heapbase.remove(heapindex, id)
 
         this.idExchange.delete(id)
+
+        return this.prepareOpResolution(id, DATA_OPS.DELETE)
     }
 
     /**
@@ -1254,18 +1412,26 @@ class HeapbaseManager extends EventEmitter {
             throw new Error(`Data of id ${id} cannot be found in the Heapbase.`)
         }
 
+        // prepare the rollback entry
+        const rollbackEntry = {
+            data: undefined, 
+            id, 
+            index: heapindex
+        }
+
         // get cache entry if any, and prepare for rollback
-        var cacheData
         if (this.dataCache.has(id)) {
-            cacheData = this.dataCache.get(id).data
-            
-            if (this.rollbackMap.has(id)) {
-                this.rollbackMap.get(id).push(cacheData)
-            } else {
-                this.rollbackMap.set(id, [cacheData])
-            }
+            const cacheData = this.dataCache.get(id).data
+            rollbackEntry.data = cacheData
 
             this.dataCache.set(id, data)
+        }
+
+        // save rollback entry
+        if (this.rollbackMap.has(id)) {
+            this.rollbackMap.get(id).push(rollbackEntry)
+        } else {
+            this.rollbackMap.set(id, [rollbackEntry])
         }
 
         // make the segment
@@ -1273,10 +1439,12 @@ class HeapbaseManager extends EventEmitter {
 
         // update the heapbase
         this.heapbase.put(heapindex, segment, id)
+
+        return this.prepareOpResolution(id, DATA_OPS.UPDATE)
     }
 
     /**
-     * Gets a data from the Heapbase.
+     * Gets a segment data from the Heapbase.
      * 
      * @param {*} id - Id of the data to be fetched.
      */
