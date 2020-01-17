@@ -706,6 +706,15 @@ const SLOT_SEGMENT_TYPES = {
 }
 
 /**
+ * Entry to the rollback map, contains pertinent info used for the rollback
+ * 
+ * @typedef RollbackEntry
+ * @property {*} id - Id of the data to rollback.
+ * @property {SlotRecord} record - Record used for the rollback.
+ * @property {number} index - Index used for the rollback.
+ */
+
+/**
  * Record that is convertible to a slot.
  * 
  * @typedef {Object.<string, *>} SlotRecord
@@ -788,7 +797,7 @@ class SlotbaseManager extends EventEmitter {
     /**
      * Map of records to be rolled back in case of a write error.
      * 
-     * @type {Map<any, SlotRecord[]>}
+     * @type {Map<any, RollbackEntry[]>}
      */
     rollbackMap
 
@@ -920,20 +929,24 @@ class SlotbaseManager extends EventEmitter {
             if (event.err) {
                 // rollback in case of an error, if there's anything to rollback
                 if (self.rollbackMap.has(event.id)) {
-                    const rollbackRecord = self.rollbackMap.get(event.id).shift()
+                    const rollbackEntry = self.rollbackMap.get(event.id).shift()
 
-                    if (rollbackRecord !== undefined) {
+                    if (rollbackEntry.record !== undefined) {
                         // push to cache instead, we already removed it from the cache
-                        self.pushToCache(event.id, rollbackRecord, false)
+                        self.pushToCache(event.id, rollbackEntry.record, false)
                     }
 
                     if (self.rollbackMap.get(event.id).length === 0) {
                         self.rollbackMap.delete(event.id)
                     }
-                }
 
-                // rollback in the id exchange
-                self.idExchange.set(event.id, event.slotindex)
+                    // rollback in the id exchange
+                    self.idExchange.set(event.id, rollbackEntry.index)
+
+                    return
+                } else {
+                    throw new Error(`Did not rollback on error, DELETE data op, data id ${event.id}`)
+                }
             }
 
             // let user know also
@@ -944,15 +957,22 @@ class SlotbaseManager extends EventEmitter {
             if (event.err) {
                 // rollback in case of an error
                 if (self.rollbackMap.has(event.id)) {
-                    const rollbackRecord = self.rollbackMap.get(event.id).shift()
+                    const rollbackEntry = self.rollbackMap.get(event.id).shift()
 
-                    if (rollbackRecord !== undefined) {
-                        self.recordCache.set(event.id, rollbackRecord)
+                    if (rollbackEntry.record !== undefined) {
+                        self.recordCache.set(event.id, rollbackEntry.record)
                     }
 
                     if (self.rollbackMap.get(event.id).length === 0) {
                         self.rollbackMap.delete(event.id)
                     }
+
+                    // rollback in the id exchange
+                    self.idExchange.set(event.id, rollbackEntry.index)
+
+                    return
+                } else {
+                    throw new Error(`Did not rollback on error, UPDATE data op, data id ${event.id}`)
                 }
             }
 
@@ -1140,22 +1160,31 @@ class SlotbaseManager extends EventEmitter {
             throw new Error(`Record of id ${id} cannot be found in the Slotbase.`)
         }
 
+        // prepare the rollback entry
+        const rollbackEntry = {
+            record: undefined, 
+            id, 
+            index: slotindex
+        }
+
         // delete in the cache, if there is
         if (this.recordCache.has(id)) {
             // make sure to prepare for rollback
             const cacheRecord = this.recordCache.get(id).record
-
-            if (this.rollbackMap.has(id)) {
-                this.rollbackMap.get(id).push(cacheRecord)
-            } else {
-                this.rollbackMap.set(id, [cacheRecord])
-            }
+            rollbackEntry.record = cacheRecord
 
             this.recordCache.delete(id)
         }
 
+        // save rollback entry
+        if (this.rollbackMap.has(id)) {
+            this.rollbackMap.get(id).push(rollbackEntry)
+        } else {
+            this.rollbackMap.set(id, [rollbackEntry])
+        }
+
         // remove now from the slotbase
-        this.slotbase.remove(slotindex)
+        this.slotbase.remove(slotindex, id)
 
         this.idExchange.delete(id)
     }
@@ -1165,49 +1194,40 @@ class SlotbaseManager extends EventEmitter {
      * 
      * @param {*} id - Id of the record to be updated.
      * @param {SlotRecord} record - Record which is the basis for the update.
-     * @param {string[]} updateList - List containing the names of fields to update.
      */
-    update(id, record, updateList) {
+    update(id, record) {
         const slotindex = this.idExchange.get(id)
         if (slotindex === undefined) {
             throw new Error(`Record of id ${id} cannot be found in the Slotbase.`)
         }
 
-        // remove duplicates from updateList
-        updateList = Array.from(new Set(updateList))
+        // prepare the rollback entry
+        const rollbackEntry = {
+            record: undefined, 
+            id, 
+            index: slotindex
+        }
 
         // get cache entry if any, and prepare for rollback
-        var cacheRecord
         if (this.recordCache.has(id)) {
-            cacheRecord = this.recordCache.get(id).record
-            
-            if (this.rollbackMap.has(id)) {
-                this.rollbackMap.get(id).push(cacheRecord)
-            } else {
-                this.rollbackMap.set(id, [cacheRecord])
-            }
+            const cacheRecord = this.recordCache.get(id).record
+            rollbackEntry.record = cacheRecord
+
+            this.recordCache.set(id, record)
         }
+
+        // save rollback entry
+        if (this.rollbackMap.has(id)) {
+            this.rollbackMap.get(id).push(rollbackEntry)
+        } else {
+            this.rollbackMap.set(id, [rollbackEntry])
+        }
+
+        // serialize into buffer first
+        const slotdata = this.serializeRecord(record)
         
-        // iterate the updateList, updateList length be less or equal to record size
-        for (let x = 0; x < updateList.length; x++) {
-            const fieldToUpdate = updateList[x]
-            const schema = this.segmentSchemas.get(fieldToUpdate)
-
-            if (schema !== undefined) {
-                const fieldData = record[fieldToUpdate]
-
-                // update cache first
-                if (cacheRecord !== undefined) {
-                    cacheRecord[fieldToUpdate] = fieldData
-                }
-
-                // make the segment
-                const segment = schema.serialize(fieldData)
-
-                // update the slotbase
-                this.slotbase.put(slotindex, segment, schema.pos, schema.size)
-            }
-        }
+        // update the slotbase
+        this.slotbase.put(slotindex, slotdata, 0, slotdata.length, id)
     }
 
     /**
