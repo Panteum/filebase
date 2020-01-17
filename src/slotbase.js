@@ -291,6 +291,7 @@ class Slotbase extends EventEmitter {
             } catch (e) {
                 if (inTimeout) {
                     this.emit(ERROR_EVENT, { err: e })
+                    return
                 } else {
                     throw e
                 }
