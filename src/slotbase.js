@@ -802,6 +802,20 @@ class SlotbaseManager extends EventEmitter {
     rollbackMap
 
     /**
+     * Map of resolve functions from data operation calls keyed by their corresponding record ids. Organized per data operation type.
+     * 
+     * @type {Map<string, Map<any, ((value:any) => void)[]>>}
+     */
+    resolveMap
+
+    /**
+     * Map of reject functions from data operation calls keyed by their corresponding record ids. Organized per data operation type.
+     * 
+     * @type {Map<string, Map<any, ((err: any) => void)[]>>}
+     */
+    rejectMap
+
+    /**
      * Creates a SlotbaseManager.
      * 
      * @param {Slotbase} slotbase - Slotbase to be managed.
@@ -816,7 +830,17 @@ class SlotbaseManager extends EventEmitter {
         this.recordCache = new Map()
         this.rollbackMap = new Map()
         this.idExchange = new Map()
-        this.cacheLimit = limit    
+        this.cacheLimit = limit
+        
+        this.resolveMap = new Map()
+        this.resolveMap.set(DATA_OPS.INSERT, new Map())
+        this.resolveMap.set(DATA_OPS.DELETE, new Map())
+        this.resolveMap.set(DATA_OPS.UPDATE, new Map())
+
+        this.rejectMap = new Map()
+        this.rejectMap.set(DATA_OPS.INSERT, new Map())
+        this.rejectMap.set(DATA_OPS.DELETE, new Map())
+        this.rejectMap.set(DATA_OPS.UPDATE, new Map()) 
     }
 
     /**
@@ -912,9 +936,8 @@ class SlotbaseManager extends EventEmitter {
                     self.recordCache.delete(event.id)
                 }
 
-                // let user know also
-                self.emit(DATA_OPS.INSERT, event)
-
+                // let user know also by calling the appropriate reject
+                self.rejectOp(event.id, DATA_OPS.INSERT, event.err)
                 return
             }
 
@@ -922,7 +945,9 @@ class SlotbaseManager extends EventEmitter {
             // also save the slotindex into the id exchange
             self.idExchange.set(event.id, event.slotindex)
             self.unguardCacheRecord(event.id)
-            self.emit(DATA_OPS.INSERT, event)
+            
+            // resolve the corresponding data operation
+            self.resolveOp(event.id, DATA_OPS.INSERT, event.slotindex)
         })
 
         this.slotbase.on(DATA_OPS.DELETE, function (event) {
@@ -943,14 +968,17 @@ class SlotbaseManager extends EventEmitter {
                     // rollback in the id exchange
                     self.idExchange.set(event.id, rollbackEntry.index)
 
+                    // let the user know about the error
+                    self.rejectOp(event.id, DATA_OPS.DELETE, event.err)
+
                     return
                 } else {
                     throw new Error(`Did not rollback on error, DELETE data op, data id ${event.id}`)
                 }
             }
 
-            // let user know also
-            self.emit(DATA_OPS.DELETE, event)
+            // resolve the corresponding data operation
+            self.resolveOp(event.id, DATA_OPS.DELETE, event.slotindex)
         })
 
         this.slotbase.on(DATA_OPS.UPDATE, function (event) {
@@ -970,19 +998,96 @@ class SlotbaseManager extends EventEmitter {
                     // rollback in the id exchange
                     self.idExchange.set(event.id, rollbackEntry.index)
 
+                    // let the user know about the error
+                    self.rejectOp(event.id, DATA_OPS.DELETE, event.err)
+
                     return
                 } else {
                     throw new Error(`Did not rollback on error, UPDATE data op, data id ${event.id}`)
                 }
             }
 
-            // let user know also
-            self.emit(DATA_OPS.UPDATE, event)
+            // resolve the corresponding data operation
+            self.resolveOp(event.id, DATA_OPS.UPDATE, event.slotindex)
         })
-
+        
         this.slotbase.on(ERROR_EVENT, function (event) {
             self.emit(ERROR_EVENT, event)
         })
+    }
+
+    /**
+     * Prepare for the eventual resolution of a data operation by returning a promise and
+     * saving its resolve and reject functions for later when the operation has concluded.
+     * 
+     * @param {*} id - Id used to identify the data operation.
+     * @param {string} opType - Type of the data operation.
+     */
+    prepareOpResolution(id, opType) {
+        const self = this
+        return new Promise (function (resolve, reject) {
+            // save the resolve function
+            if (self.resolveMap.get(opType).has(id)) {
+                self.resolveMap.get(opType).get(id).push(resolve)
+            } else {
+                self.resolveMap.get(opType).set(id, [resolve])
+            }
+
+            // save the reject function
+            if (self.rejectMap.get(opType).has(id)) {
+                self.rejectMap.get(opType).get(id).push(reject)
+            } else {
+                self.rejectMap.get(opType).set(id, [reject])
+            }
+        })
+    }
+
+    /**
+     * Resolve a pending data operation call.
+     * 
+     * @param {*} id - Id used to identify the data operation.
+     * @param {string} opType - Type of the data operation.
+     * @param  {...any} args - Additional arguments to pass to the resolve function.
+     */
+    resolveOp(id, opType, ...args) {
+        // remove the counterpart reject function first
+        const rejectQueue = this.rejectMap.get(opType).get(id)
+        rejectQueue.shift()
+        if (rejectQueue.length === 0) {
+            this.rejectMap.get(opType).delete(id)
+        }
+
+        const resolveQueue = this.resolveMap.get(opType).get(id)
+        const resolve = resolveQueue.shift()
+        if (resolveQueue.length === 0) {
+            this.resolveMap.get(opType).delete(id)
+        }
+
+        resolve(args)
+    }
+
+    /**
+     * Reject a pending data operation call.
+     * 
+     * @param {*} id - Id used to identify the data operation.
+     * @param {string} opType - Type of the data operation.
+     * @param {*} err - Error argument to pass to the reject function.
+     */
+    rejectOp(id, opType, err) {
+        // remove the counterpart resolve function first
+        const resolveQueue = this.resolveMap.get(opType).get(id)
+        resolveQueue.shift()
+        if (resolveQueue.length === 0) {
+            this.resolveMap.get(opType).delete(id)
+        }
+
+        const rejectQueue = this.rejectMap.get(opType).get(id)
+        const reject = rejectQueue.shift()
+        if (rejectQueue.length === 0) {
+            this.rejectMap.get(opType).delete(id)
+        }
+
+        reject(err)
     }
 
     /**
@@ -1147,6 +1252,8 @@ class SlotbaseManager extends EventEmitter {
 
         // save to cache while insert is ongoing
         this.pushToCache(id, record)
+
+        return this.prepareOpResolution(id, DATA_OPS.INSERT)
     }
 
     /**
@@ -1187,6 +1294,8 @@ class SlotbaseManager extends EventEmitter {
         this.slotbase.remove(slotindex, id)
 
         this.idExchange.delete(id)
+
+        return this.prepareOpResolution(id, DATA_OPS.DELETE)
     }
 
     /**
@@ -1228,6 +1337,8 @@ class SlotbaseManager extends EventEmitter {
         
         // update the slotbase
         this.slotbase.put(slotindex, slotdata, 0, slotdata.length, id)
+
+        return this.prepareOpResolution(id, DATA_OPS.DELETE)
     }
 
     /**
