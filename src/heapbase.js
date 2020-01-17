@@ -4,7 +4,7 @@ const fsprom = fs.promises
 const path = require("path")
 const EventEmitter = require("events")
 
-const { DATA_OPS, FILEBASE_ERRS, OPS_EXEC_DELAY, CACHE_LIMIT, HOLLOW_FUNC } = require("./constants")
+const { DATA_OPS, FILEBASE_ERRS, OPS_EXEC_DELAY, CACHE_LIMIT, HOLLOW_FUNC, ERROR_EVENT } = require("./constants")
 
 /**
  * Maximum number of bytes to handle during heap cleanup.
@@ -194,17 +194,17 @@ class Heapbase extends EventEmitter {
      * @param {HeapIndex[]} occupiedSegments - List of HeapIndexes indicating which segments are occupied.
      */
     async load(occupiedSegments) {
-        const isIndexlistFilled = Array.isArray(occupiedSegments) && occupiedSegments.length === 0
+        const isIndexlistFilled = Array.isArray(occupiedSegments) && occupiedSegments.length !== 0
 
         // get the file stats
-        const handle = await fsprom.open(this.filepath, "r")
+        const handle = await fsprom.open(this.filepath, "a+")
         const stats = await handle.stat()
         await handle.close()
 
         // no point in loading any further without the indexes in a non-empty file
         if (!isIndexlistFilled && stats.size !== 0) {
             this.errorStatus = FILEBASE_ERRS.COMMON
-            throw new Error(`Cannot load the Heapbase without a heapindex list if persistence file has contents.`)
+            throw new Error(`Cannot load the Heapbase without a heapindex list if persistence file has contents. File size: ${stats.size}`)
         }
 
         // only load occupied segments if the file has contents
@@ -378,7 +378,7 @@ class Heapbase extends EventEmitter {
      */
     async flushOpQueue(handle, inTimeout = false) {
         if (this.opQueue.length === 0) {
-            return
+            return handle
         }
 
         // open the persistence file if not passed
@@ -994,6 +994,8 @@ class HeapbaseManager extends EventEmitter {
      * @param {number} [limit] - Limit of records that can be stored in the cache. Default is 1000.
      */
     constructor (heapbase, schema, limit = CACHE_LIMIT) {
+        super()
+
         this.heapbase = heapbase
         this.segmentSchema = schema
         this.dataCache = new Map()
@@ -1034,7 +1036,7 @@ class HeapbaseManager extends EventEmitter {
             this.segmentSchema.deserialize = HOLLOW_FUNC
         }
 
-        if (value.serialize === undefined) {
+        if (this.segmentSchema.serialize === undefined) {
             this.segmentSchema.serialize = HOLLOW_FUNC
         }
 
@@ -1171,7 +1173,7 @@ class HeapbaseManager extends EventEmitter {
     getFromCache(id) {
         const output = this.dataCache.get(id)
 
-        // inserts back to recordCache to set it as newest
+        // inserts back to dataCache to set it as newest
         this.dataCache.delete(output)
         this.dataCache.set(id, output)
 
@@ -1206,7 +1208,7 @@ class HeapbaseManager extends EventEmitter {
         this.heapbase.add(heapdata, id)
 
         // save to cache while insert is ongoing
-        this.pushToCache(id, record)
+        this.pushToCache(id, data)
     }
 
     /**
@@ -1274,7 +1276,7 @@ class HeapbaseManager extends EventEmitter {
     }
 
     /**
-     * Gets a record from the Heapbase.
+     * Gets a data from the Heapbase.
      * 
      * @param {*} id - Id of the data to be fetched.
      */
