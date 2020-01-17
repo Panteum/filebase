@@ -280,7 +280,7 @@ class Slotbase extends EventEmitter {
      */
     async flushOpQueue(handle, inTimeout = false) {
         if (this.opQueue.length === 0) {
-            return
+            return handle
         }
 
         // open the persistence file if not passed
@@ -631,7 +631,7 @@ class Slotbase extends EventEmitter {
      * @param {number[]} [slotindexes] - Indexes to fetch. If not set, the iterator fetches all.
      */
     async iterate(slotindexes) {
-        const handle = await fsprom.open(this.filepath, "a+")
+        var handle = await fsprom.open(this.filepath, "a+")
 
         // perform all pending operations first
         handle = await this.flushOpQueue(handle)
@@ -792,6 +792,8 @@ class SlotbaseManager extends EventEmitter {
      * @param {number} [limit] - Limit of records that can be stored in the cache. Default is 1000.
      */
     constructor (slotbase, schemas, limit = CACHE_LIMIT) {
+        super()
+
         this.slotbase = slotbase
         this.segmentSchemas = schemas
         this.recordCache = new Map()
