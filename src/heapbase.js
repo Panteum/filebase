@@ -428,7 +428,7 @@ class Heapbase extends EventEmitter {
                 if (eventName) {
                     // emit the event
                     eventObj = eventObj || {}
-                    eventObj.id == opId
+                    eventObj.id = opId
                     eventObj.err = err
                     this.emit(eventName, eventObj)
                 }
