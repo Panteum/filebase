@@ -1093,7 +1093,7 @@ class SlotbaseManager extends EventEmitter {
      * @param {SlotRecord} record - Record to serialize.
      */
     serializeRecord(record) {
-        const slotdata = Buffer.alloc(this.slotbase.slotSize)
+        var slotdata = Buffer.alloc(this.slotbase.slotSize)
 
         // iterate record schema, to write to slotdata
         const schemaIterator = this.segmentSchemas.values()
