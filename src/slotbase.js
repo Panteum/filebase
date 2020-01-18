@@ -651,7 +651,7 @@ class Slotbase extends EventEmitter {
             next: async function () {
                 const slotindex = slotindexes ? slotindexes[this.currIndex] : this.currIndex
                 const isDone = slotindex === undefined || self.slotCount <= slotindex
-                const canOutput = isDone && !self.freeSlots.includes(slotindex)
+                const canOutput = !isDone && !self.freeSlots.includes(slotindex)
 
                 var value
                 if (canOutput) {
