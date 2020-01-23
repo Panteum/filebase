@@ -28,12 +28,10 @@ BigInt.prototype.toJSON = function () {
  */
 
 /**
- * Builds an entry in a JSONHeapbase's position exchange.
+ * Function passed with a record during a filebase's load event.
  * 
- * @callback ExchangeBuilder
- * @param {*} recordJSON - Record serialized in JSON.
- * @param {number} position - Position of the serialized record in the file.
- * @param {number} size - Size of the serialized record, in bytes.
+ * @callback RecordIterator
+ * @param {*} record - Record to be passed.
  */
 
 /**
@@ -133,8 +131,9 @@ class JSONHeapbase extends EventEmitter {
     /**
      * Loads the Heapbase. During loading, occupied and free segment is recorded using a list of indexes.
      * 
+     * @param {RecordIterator} iterate - Iterates the records loaded.
      */
-    async load() {
+    async load(iterate) {
         // get the file stats
         const handle = await fsprom.open(this.filepath, `a+`)
         const stats = await handle.stat()
@@ -164,6 +163,8 @@ class JSONHeapbase extends EventEmitter {
                     if (exchangeId === undefined) {
                         throw new Error(`Record at position: ${recordPosition} doesn't have exchange id property of ${this.exchangeIdName}!`)
                     }
+
+                    iterate(record)
 
                     this.positionExchange.set(exchangeId, [recordPosition, recordSize])
                 }
