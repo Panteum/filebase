@@ -64,6 +64,7 @@ class JSONBase extends EventEmitter {
 
         this.filepath = filepath
         this.persistDelay = persistDelay || PERSIST_DELAY_DEFAULT
+        this.records = {}
         this.isLoaded = false
         this.shouldPersist = false
     }
@@ -80,7 +81,9 @@ class JSONBase extends EventEmitter {
         
         // try to load the JSON
         try {
-            this.records = JSON.parse(serialJSON)
+            if (serialJSON.length > 0) {
+                this.records = JSON.parse(serialJSON)
+            }
         } catch (e) {
             throw e
         }
