@@ -102,7 +102,7 @@ class JSONBase extends EventEmitter {
             const serialJSON = JSON.stringify(this.records)
 
             // write the JSON to file
-            const handle = await fsprom.open(this.filepath, "a+")
+            const handle = await fsprom.open(this.filepath, "w")
             await handle.writeFile(serialJSON)
             await handle.close()
         }
