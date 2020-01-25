@@ -165,7 +165,9 @@ class JSONHeapbase extends EventEmitter {
                         throw new Error(`Record at position: ${recordPosition} doesn't have exchange id property of ${this.exchangeIdName}!`)
                     }
 
-                    iterate(record)
+                    if (typeof iterate === "function") {
+                        iterate(record)
+                    }
 
                     this.positionExchange.set(exchangeId, [recordPosition, recordSize])
 
