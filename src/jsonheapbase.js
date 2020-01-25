@@ -168,6 +168,8 @@ class JSONHeapbase extends EventEmitter {
                     iterate(record)
 
                     this.positionExchange.set(exchangeId, [recordPosition, recordSize])
+
+                    offset += recordSize
                 }
             }
         } catch (e) {
