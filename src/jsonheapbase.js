@@ -119,6 +119,7 @@ class JSONHeapbase extends EventEmitter {
         // load the important values
         this.filepath = filepath
         this.lastPosition = 0
+        this.positionExchange = new Map()
         this.exchangeIdName = exchangeIdName
 
         // load operation-based values
