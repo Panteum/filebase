@@ -6,7 +6,7 @@ const EventEmitter = require(`events`)
 
 const { DATA_OPS } = require(`./constants`)
 
-const OP_DELAY_DEFAULT = 5000
+const OP_DELAY_DEFAULT = 100
 
 const RECORD_SIZE_SIZE = 4
 
