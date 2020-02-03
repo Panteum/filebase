@@ -187,6 +187,23 @@ class JSONHeapbase extends EventEmitter {
         // ready for action
         this.isLoaded = true
     }
+
+    /**
+     * Transforms the position exchange map into a JSON-able object.
+     * 
+     */
+    serializeExchange() {
+        return [...this.positionExchange]
+    }
+
+    /**
+     * Syncs this JSONHeapbase's position exchange with a passed position exchange.
+     * 
+     * @param {[any, [number,number]][]} positionExchange - Exchange to sync with.
+     */
+    syncExchange(positionExchange) {
+        this.positionExchange = new Map(positionExchange)
+    }
     
     /**
      * Sets the timeout for data operation queue flushing.
