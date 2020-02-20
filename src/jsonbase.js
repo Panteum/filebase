@@ -105,6 +105,8 @@ class JSONBase extends EventEmitter {
             const handle = await fsprom.open(this.filepath, "w")
             await handle.writeFile(serialJSON)
             await handle.close()
+            
+            self.shouldPersist = false
         }
     }
 

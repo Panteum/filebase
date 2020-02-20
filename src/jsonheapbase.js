@@ -154,10 +154,9 @@ class JSONHeapbase extends EventEmitter {
                     const recordPosition = offset
 
                     // update the offset and read the record
-                    offset += RECORD_SIZE_SIZE
                     const recordBuffer = Buffer.alloc(recordSize)
                     const recordReadOutput = await handle.read(recordBuffer, 0, recordSize, offset)
-                    const recordJSON = recordReadOutput.buffer.toString()
+                    const recordJSON = recordReadOutput.buffer.slice(RECORD_SIZE_SIZE).toString()
                     const record = JSON.parse(recordJSON)
 
                     const exchangeId = record[this.exchangeIdName]
@@ -331,7 +330,7 @@ class JSONHeapbase extends EventEmitter {
             }
 
             const allBuffer = Buffer.alloc(RECORD_SIZE_SIZE + recordBuffer.length)
-            allBuffer.writeInt32BE(recordBuffer.length, 0)
+            allBuffer.writeInt32BE(allBuffer.length, 0)
             allBuffer.set(recordBuffer, RECORD_SIZE_SIZE)
 
             await handle.write(allBuffer, 0, allBuffer.length, this.lastPosition)
@@ -433,13 +432,21 @@ class JSONHeapbase extends EventEmitter {
         handle = await this.flushOpQueue(handle)
 
         // get the serialized record
-        const readOutput = await handle.read(buffer, 0, buffer.length, posAndSize[0] + RECORD_SIZE_SIZE)
+        const readOutput = await handle.read(buffer, 0, buffer.length, posAndSize[0])
 
         // close the file handle for no leaks
         await handle.close()
 
         // return the record unserialized
-        return JSON.parse(readOutput.buffer.toString())
+        let output
+        try {
+            output = JSON.parse(readOutput.buffer.slice(RECORD_SIZE_SIZE).toString())
+        } catch (e) {
+            console.debug(`Error in parsing this entry: `, readOutput.buffer.toString())
+            throw e
+        }
+
+        return output
     }
 }
 
