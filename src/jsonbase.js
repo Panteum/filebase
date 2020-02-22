@@ -106,7 +106,7 @@ class JSONBase extends EventEmitter {
             await handle.writeFile(serialJSON)
             await handle.close()
             
-            self.shouldPersist = false
+            this.shouldPersist = false
         }
     }
 
