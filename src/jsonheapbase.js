@@ -47,7 +47,7 @@ class JSONHeapbase extends EventEmitter {
     filepath
 
     /**
-     * Exchange map of a record's id and the record's position in the persistence file.
+     * Exchange map of a record's id and the record's position and size in the persistence file.
      * 
      * @type {Map<*, [number, number]>}
      */
@@ -185,6 +185,81 @@ class JSONHeapbase extends EventEmitter {
         
         // ready for action
         this.isLoaded = true
+    }
+
+    /**
+     * Load the JSONHeapbase with a passed position exchange and last position.
+     * 
+     * @param {Map<*, [number, number]>} positionExchange - Exchange map of record id and file positions.
+     * @param {number} lastPosition - Position after the last record's end byte.
+     */
+    async loadWithExchange(positionExchange, lastPosition) {
+        this.positionExchange = positionExchange
+        this.lastPosition = lastPosition
+        
+        // ready for action
+        this.isLoaded = true
+    }
+
+    /**
+     * Asynchronously cleans the persistence file of this JSONHeapbase, using a copy.
+     * 
+     */
+    async cleanup() {
+        const cleanFilePath = this.filepath + `.clean`
+
+        let cleanHandle = await fsprom.open(cleanFilePath, `w+`)
+        let dirtyHandle = await fsprom.open(this.filepath, `r`)
+
+        let lastPosition = 0
+        const positionExchange = new Map()
+        try {
+            const recordIterator = this.positionExchange.keys()
+            while (true) {
+                const { done, value } = recordIterator.next()
+
+                if (done) {
+                    break
+                }
+
+                const id = value
+                const [pos, size] = this.positionExchange.get(id)
+
+                const recordBuffer = Buffer.alloc(size)
+                const recordReadOutput = await dirtyHandle.read(recordBuffer, 0, size, pos)
+                await cleanHandle.write(recordReadOutput.buffer, 0, size, lastPosition)
+
+                positionExchange.set(id, [lastPosition, size])
+                lastPosition += size
+            }
+
+            this.lastPosition = lastPosition
+            this.positionExchange = positionExchange
+
+            await dirtyHandle.close()
+            dirtyHandle = null
+
+            await cleanHandle.close()
+            cleanHandle = null
+
+            await fsprom.rename(cleanFilePath, this.filepath)
+            await fsprom.unlink(cleanFilePath)
+        } catch (e) {
+            console.debug(`Cleaning persistence file ${this.filepath} threw error:`, e)
+            throw e
+        } finally {
+            cleanHandle && await cleanHandle.close()
+            dirtyHandle && await dirtyHandle.close()
+        }
+    }
+
+    /**
+     * Makes a back up copy of the persistence file.
+     * 
+     */
+    async backup() {
+        const backupPath = this.filepath + `.backup`
+        await fsprom.copyFile(this.filepath, backupPath)
     }
 
     /**
