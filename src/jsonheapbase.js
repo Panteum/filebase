@@ -243,7 +243,6 @@ class JSONHeapbase extends EventEmitter {
             cleanHandle = null
 
             await fsprom.rename(cleanFilePath, this.filepath)
-            await fsprom.unlink(cleanFilePath)
         } catch (e) {
             console.debug(`Cleaning persistence file ${this.filepath} threw error:`, e)
             throw e
