@@ -169,9 +169,9 @@ class JSONHeapbase extends EventEmitter {
                     }
 
                     this.positionExchange.set(exchangeId, [recordPosition, recordSize])
-
-                    offset += recordSize
                 }
+
+                offset += recordSize
             }
         } catch (e) {
             console.debug(`Reading persistence file ${this.filepath} threw error:`, e)
@@ -406,19 +406,20 @@ class JSONHeapbase extends EventEmitter {
             const allBuffer = Buffer.alloc(RECORD_SIZE_SIZE + recordBuffer.length)
             allBuffer.writeInt32BE(allBuffer.length, 0)
             allBuffer.set(recordBuffer, RECORD_SIZE_SIZE)
-
-            await handle.write(allBuffer, 0, allBuffer.length, this.lastPosition)
-
-            this.positionExchange.set(exchangeId, [this.lastPosition, allBuffer.length])
-
+            
+            const writePosition = this.lastPosition
             this.lastPosition += allBuffer.length
+
+            this.positionExchange.set(exchangeId, [writePosition, allBuffer.length])
+            
+            await handle.write(allBuffer, 0, allBuffer.length, writePosition)
 
             op.resolve()
         } catch (e) {
             op.reject(e)
         }
     }
-
+    
     /**
      * Removes a heap segment's contents through the operation queue.
      * 
