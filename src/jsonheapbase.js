@@ -135,6 +135,13 @@ class JSONHeapbase extends EventEmitter {
      * @param {RecordIterator} iterate - Iterates the records loaded.
      */
     async load(iterate) {
+        const dirPath = path.dirname(this.filepath)
+
+        // to make sure the directory exists
+        if (!fs.existsSync(dirPath)) {
+            fs.mkdirSync(dirPath)
+        }
+
         // get the file stats
         const handle = await fsprom.open(this.filepath, `a+`)
         const stats = await handle.stat()

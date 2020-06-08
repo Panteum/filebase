@@ -157,6 +157,13 @@ class Slotbase extends EventEmitter {
      * 
      */
     async load() {
+        const dirPath = path.dirname(this.filepath)
+
+        // to make sure the directory exists
+        if (!fs.existsSync(dirPath)) {
+            fs.mkdirSync(dirPath)
+        }
+
         // open the file for slot count and free slot checking
         const handle = await fsprom.open(this.filepath, "a+")
         const stats = await handle.stat()

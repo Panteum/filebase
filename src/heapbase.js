@@ -196,6 +196,13 @@ class Heapbase extends EventEmitter {
     async load(occupiedSegments) {
         const isIndexlistFilled = Array.isArray(occupiedSegments) && occupiedSegments.length !== 0
 
+        const dirPath = path.dirname(this.filepath)
+
+        // to make sure the directory exists
+        if (!fs.existsSync(dirPath)) {
+            fs.mkdirSync(dirPath)
+        }
+
         // get the file stats
         const handle = await fsprom.open(this.filepath, "a+")
         const stats = await handle.stat()

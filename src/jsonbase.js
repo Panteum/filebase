@@ -74,6 +74,13 @@ class JSONBase extends EventEmitter {
      * 
      */
     async load() {
+        const dirPath = path.dirname(this.filepath)
+
+        // to make sure the directory exists
+        if (!fs.existsSync(dirPath)) {
+            fs.mkdirSync(dirPath)
+        }
+
         // get the JSON from the file
         const handle = await fsprom.open(this.filepath, "a+")
         const serialJSON = await handle.readFile({ encoding: "utf8" })
