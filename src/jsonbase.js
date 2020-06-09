@@ -98,6 +98,10 @@ class JSONBase extends EventEmitter {
         this.isLoaded = true
     }
 
+    cleanup() {
+        return fsprom.unlink(this.filepath)
+    }
+
     /**
      * Persists the in-memory database to the file.
      * 
